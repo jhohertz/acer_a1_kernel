@@ -15,6 +15,7 @@ $(KERNEL_CONFIG): $(KERNEL_OUT)
 
 $(TARGET_PREBUILT_KERNEL): $(KERNEL_OUT) $(KERNEL_CONFIG) acp
 	$(MAKE) -C kernel O=../$(KERNEL_OUT) ARCH=arm CROSS_COMPILE=arm-eabi-
+	mkdir -p $(TARGET_OUT)/etc/wifi
 	$(ACP) $(KERNEL_OUT)/$(BCM_WIFI_PATH)/dhd.ko $(TARGET_OUT)/etc/wifi/dhd.ko
 
 kerneltags: $(KERNEL_OUT) $(KERNEL_CONFIG)
