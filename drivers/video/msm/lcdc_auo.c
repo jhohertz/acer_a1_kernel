@@ -52,7 +52,13 @@
 #define GPIO_HSYNC    137
 #define GPIO_VDEN     138
 
-#define gpio_output_enable(gpio,en) gpio_configure(gpio, en==0?GPIOF_INPUT:GPIOF_DRIVE_OUTPUT)
+#define gpio_output_enable(gpio,en) do { \
+    if (en == 0) { \
+	gpio_direction_input(gpio); \
+    } \
+    else { \
+	gpio_direction_output(gpio, 1); \
+    } } while (0)
 
 /* Code from fastboot */
 #define LCD_RST_HI         gpio_set_value(GPIO_LCD_RST,1)
@@ -70,72 +76,6 @@
 #define CMD_END     0xFE
 #define CMD_DELAY   0xFF
 #define CMD_P2800   0xFD
-
-static unsigned int LCMID[3];
-int ReadID(void)
-{
-	int bit;
-	unsigned char mask;
-	int param;
-	unsigned int CMD[] = {
-		0xDA,
-		0xDB,
-		0xDC,
-	};
-
-	pr_debug("%s called\n", __func__);
-
-	for (param = 0; param < 3; param++) {
-		LCMID[param] = 0;
-		/* RDID CMD */
-		udelay(SPI_DELAY*2);
-		LCD_SPI_CS_LO;
-		udelay(SPI_DELAY);
-		LCD_SPI_CLK_LO;
-		LCD_SPI_SET_DI(0x00);
-		udelay(SPI_DELAY);
-		LCD_SPI_CLK_HI;
-		udelay(SPI_DELAY);
-		LCD_SPI_CLK_LO;
-		udelay(SPI_DELAY);
-
-		for (bit = 7; bit >= 0; bit--) {
-			mask = (unsigned char)1 << bit;
-			LCD_SPI_CLK_LO;
-			if (CMD[param] & mask) {
-				LCD_SPI_SET_DI(1);
-			} else {
-				LCD_SPI_SET_DI(0);
-			}
-			udelay(SPI_DELAY);
-			LCD_SPI_CLK_HI;
-			udelay(SPI_DELAY);
-			LCD_SPI_CLK_LO;
-			udelay(SPI_DELAY);
-		}
-		gpio_output_enable(GPIO_SPI_DI, 0);
-		udelay(SPI_DELAY);
-
-		LCMID[param] = 0;
-		for (bit = 7; bit >= 0; bit--) {
-			LCD_SPI_CLK_HI;
-			if (gpio_get_value(GPIO_SPI_DI))
-				LCMID[param] |= 1 << bit;
-
-			LCD_SPI_CLK_LO;
-			udelay(SPI_DELAY);
-		}
-
-		LCD_SPI_CS_HI;
-		udelay(SPI_DELAY);
-		pr_debug("%s CMD[] = 0x%02X LCMID[%d] = 0x%02X\n",
-			__func__, CMD[param], param, LCMID[param]);
-		gpio_output_enable(GPIO_SPI_DI, 1);
-	}
-	pr_debug("%s leaved\n", __func__);
-	return 0;
-
-}
 
 int PowerOn2800(void)
 {
@@ -491,28 +431,14 @@ void panel_poweron(int bOnOff)
 		LCD_SPI_CS_LO;
 }
 
-static ssize_t show_auo_id(struct device_driver *dev, char *buf)
-{
-	ReadID();
-	return sprintf(buf, "%02X %02X %02X\n", LCMID[0], LCMID[1], LCMID[2]);
-}
-
-static DRIVER_ATTR(lcm_id, S_IRUGO| S_IWUSR | S_IWGRP, show_auo_id, NULL);
-
 /* TODO Implement auo panel on/off, backlight functions */
 static int lcdc_auo_panel_on(struct platform_device *pdev)
 {
-	int rc = 0;
-
 	pr_debug("%s ++ entering\n", __func__);
 	panel_poweron(1);
 #ifdef CONFIG_MACH_Q8K_A1_EVT
 	gpio_set_value(GPIO_BLPWM,1);  //backlight power on
 #endif
-	rc = driver_create_file(pdev->dev.driver, &driver_attr_lcm_id);
-	if (rc) {
-		printk(KERN_ERR "lcm_id: sysfs attr create failed\n");
-	}
 	pr_debug("%s -- leaving\n", __func__);
 	return 0;
 }
@@ -520,7 +446,6 @@ static int lcdc_auo_panel_on(struct platform_device *pdev)
 static int lcdc_auo_panel_off(struct platform_device *pdev)
 {
 	pr_debug("%s ++ entering\n", __func__);
-	driver_remove_file(pdev->dev.driver, &driver_attr_lcm_id);
 	panel_poweron(0);
 #ifdef CONFIG_MACH_Q8K_A1_EVT
 	gpio_set_value(GPIO_BLPWM,0);  //backlight power off
@@ -534,8 +459,21 @@ static int lcdc_auo_panel_off(struct platform_device *pdev)
 }
 
 static void lcdc_auo_lcd_set_backlight(struct msm_fb_data_type *mfd) {
-	/* TODO implement backlight function */
+    /* Backlight is handled by AVR */
 }
+
+static int __devinit lcdc_auo_probe(struct platform_device *pdev)
+{
+	msm_fb_add_device(pdev);
+	return 0;
+}
+
+static struct platform_driver this_driver = {
+	.probe = lcdc_auo_probe,
+	.driver = {
+		.name	= "lcdc_auo_wvga",
+	},
+};
 
 static struct msm_fb_panel_data lcdc_auo_panel_data = {
 	.on = lcdc_auo_panel_on,
@@ -543,11 +481,19 @@ static struct msm_fb_panel_data lcdc_auo_panel_data = {
 	.set_backlight = lcdc_auo_lcd_set_backlight,
 };
 
-static struct msm_panel_info pinfo;
+
+static struct platform_device this_device = {
+	.name	= "lcdc_auo_wvga",
+	.id	= 1,
+	.dev    = {
+		.platform_data = &lcdc_auo_panel_data,
+	}
+};
 
 static int __init lcdc_auo_init(void)
 {
 	int ret;
+	struct msm_panel_info *pinfo;
 
 #ifdef CONFIG_FB_MSM_TRY_MDDI_CATCH_LCDC_PRISM
 	ret = msm_fb_detect_client("lcdc_auo_wvga");
@@ -557,32 +503,39 @@ static int __init lcdc_auo_init(void)
 	if (ret && (mddi_get_client_id() != 0))
 		return 0;
 #endif
-	pinfo.xres = 480;
-	pinfo.yres = 800;
-	pinfo.type = LCDC_PANEL;
-	pinfo.pdest = DISPLAY_1;
-	pinfo.wait_cycle = 0;
-	pinfo.bpp = 16;
-	pinfo.fb_num = 2;
-	pinfo.clk_rate = 24576000; /* 24.576MHz to match the SPEC. from AMSS */
-	pinfo.width = 46; /* physical width in mm */
-	pinfo.height = 77; /* physical height in mm */
-
-	pinfo.lcdc.h_back_porch = 12;
-	pinfo.lcdc.h_front_porch = 16;
-	pinfo.lcdc.h_pulse_width = 4;
-	pinfo.lcdc.v_back_porch = 3;
-	pinfo.lcdc.v_front_porch = 3;
-	pinfo.lcdc.v_pulse_width = 2;
-	pinfo.lcdc.border_clr = 0;		/* blk */
-	pinfo.lcdc.underflow_clr = 0xff;	/* blue */
-	pinfo.lcdc.hsync_skew = 0;
-
-	ret = lcdc_device_register(&pinfo, &lcdc_auo_panel_data);
+	ret = platform_driver_register(&this_driver);
 	if (ret)
-		printk(KERN_ERR "%s: failed to register device!\n", __func__);
+		return ret;
 
-	auo_gpio_init();
+	pinfo = &lcdc_auo_panel_data.panel_info;
+	pinfo->xres = 480;
+	pinfo->yres = 800;
+	pinfo->type = LCDC_PANEL;
+	pinfo->pdest = DISPLAY_1;
+	pinfo->wait_cycle = 0;
+	pinfo->bpp = 16;
+	pinfo->fb_num = 2;
+	pinfo->clk_rate = 24576000; /* 24.576MHz to match the SPEC. from AMSS */
+	pinfo->width = 46; /* physical width in mm */
+	pinfo->height = 77; /* physical height in mm */
+
+	pinfo->lcdc.h_back_porch = 12;
+	pinfo->lcdc.h_front_porch = 16;
+	pinfo->lcdc.h_pulse_width = 4;
+	pinfo->lcdc.v_back_porch = 3;
+	pinfo->lcdc.v_front_porch = 3;
+	pinfo->lcdc.v_pulse_width = 2;
+	pinfo->lcdc.border_clr = 0;		/* blk */
+	pinfo->lcdc.underflow_clr = 0xff;	/* blue */
+	pinfo->lcdc.hsync_skew = 0;
+
+	ret = platform_device_register(&this_device);
+	if (ret) {
+		platform_driver_unregister(&this_driver);
+	}
+	else {
+		auo_gpio_init();
+	}
 
 	return ret;
 }
