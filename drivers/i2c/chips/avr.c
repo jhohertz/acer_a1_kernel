@@ -136,7 +136,9 @@ struct avr_data {
 #ifdef CONFIG_HAS_EARLYSUSPEND
 	struct early_suspend early_suspend;
 #endif
-	int brightness;
+	int lcd_brightness;
+	enum led_brightness led_brightness;
+
 	int last_key;
 };
 
@@ -223,7 +225,7 @@ __ATTR(fw_check, S_IRUGO,get_avr_firmware, NULL);
 static int avr_backlight_get_intensity(struct backlight_device *bd)
 {
 	struct avr_data* data = dev_get_drvdata(&bd->dev);
-        return data->brightness;
+        return data->lcd_brightness;
 }
 
 // This should get merged into update_status
@@ -251,7 +253,7 @@ static void avr_backlight_set_brightness(int value)
 		count++;
 	}
 
-	the_avr_data->brightness = value;
+	the_avr_data->lcd_brightness = value;
 }
 
 static int avr_backlight_update_status(struct backlight_device *bd)
@@ -274,22 +276,31 @@ static struct backlight_ops avr_backlight_ops = {
 };
 
 // New LEDs code sysfs handling
-// FIXME: causes kernel panic
 static void avr_keypad_led_set(struct led_classdev *led_cdev,
-	                         enum led_brightness value) {
-
+	                         enum led_brightness value)
+{
 	uint8_t data_buf[2] = {0};
 	int avr_brightness = AVR_LED_ON;
 	struct avr_data* data = container_of(led_cdev, struct avr_data, led_cdev);
 
-	if (value == LED_OFF)
-	    avr_brightness = AVR_LED_OFF;
+	// By convention LED_FULL is 255, and we have 32 values.
+	// Recent kernels have max_brightness field, we don't, yet.
+	// We will use (value + 1) / 8 
+	//
+	avr_brightness = (value + 1) / 8;
 
 	data_buf[0] = I2C_REG_LED_1;
 	data_buf[1] = avr_brightness;
 	i2c_write(data->client, data_buf);
+
+	data->led_brightness = value;
 }
 
+enum led_brightness avr_keypad_led_get(struct led_classdev *led_cdev)
+{
+	struct avr_data* data = container_of(led_cdev, struct avr_data, led_cdev);
+	return data->led_brightness;
+}
 
 static int __init avr_init(void)
 {
@@ -371,6 +382,7 @@ static int avr_probe(struct i2c_client *client, const struct i2c_device_id *id)
 
 	data->led_cdev.name = "avr::keypad";
 	data->led_cdev.brightness_set = avr_keypad_led_set;
+	data->led_cdev.brightness_get = avr_keypad_led_get;
 	data->led_cdev.flags = LED_CORE_SUSPENDRESUME;
 
 	bd->props.max_brightness = AVR_BKL_MAX_LVL;
@@ -447,15 +459,18 @@ error:
 
 static int avr_remove(struct i2c_client *client)
 {
-	struct avr_data *tp = i2c_get_clientdata(client);
-	input_unregister_device(tp->input);
-	free_irq(client->irq, tp);
+	struct avr_data *data = i2c_get_clientdata(client);
+	input_unregister_device(data->input);
+	free_irq(client->irq, data);
+	
+	backlight_device_unregister(data->bd);
+	led_classdev_unregister(&data->led_cdev);
+
 #ifdef CONFIG_HAS_EARLYSUSPEND
-	unregister_early_suspend(&tp->early_suspend);
+	unregister_early_suspend(&data->early_suspend);
 #endif
 
-	// FIXME: unregister backlight
-	// FIXME: unregister keypad leds
+	kfree(data);
 
 	return 0;
 }
@@ -808,7 +823,7 @@ static void led_on(struct i2c_client *client){
 	uint8_t data_buf[2] = {0};
 
 	data_buf[0] = I2C_REG_LED_1;
-	data_buf[1] = AVR_LED_ON;
+	data_buf[1] = 0x2; // Low power
 	i2c_write(client, data_buf);
 }
 
@@ -862,4 +877,4 @@ module_init(avr_init);
 module_exit(avr_exit);
 
 MODULE_AUTHOR("Elay Hu <Elay_Hu@acer.com.tw>");
-
+MODULE_DESCRIPTION("AVR micro-P driver");
