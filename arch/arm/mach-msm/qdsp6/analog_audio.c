@@ -27,6 +27,9 @@
 #ifdef CONFIG_AUDIO_FM2018
 #include <mach/fm2018.h>
 #endif
+#ifdef CONFIG_MACH_ACER_A1
+#include <mach/board.h>
+#endif
 
 void analog_init(void)
 {
