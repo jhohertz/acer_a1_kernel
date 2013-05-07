@@ -22,7 +22,6 @@
 #include <linux/miscdevice.h>
 #include <asm/uaccess.h>
 #include <linux/earlysuspend.h>
-#include <linux/backlight.h>
 #include <linux/fb.h>
 #include <linux/leds.h>
 
@@ -47,6 +46,7 @@
 #define AVR_DRIVER_NAME           "avr"
 
 #define MAX_BACKLIGHT_BRIGHTNESS  255
+#define MAX_LED_BRIGHTNESS  255
 /* Modify AVR_BKL_LVL for backlight level 30 to 255 */
 #define AVR_BKL_MAX_LVL           0x20
 #define AVR_BKL_MIN_LVL           0x01
@@ -125,8 +125,8 @@ static const struct i2c_device_id avr_id[] = {
 struct avr_data {
 	struct i2c_client *client;
 	struct input_dev *input;
-	struct backlight_device *bd;
-	struct led_classdev led_cdev;
+	struct led_classdev led_bl;
+	struct led_classdev led_keypad;
 
 	struct work_struct work;
 	struct delayed_work led_work;
@@ -136,9 +136,6 @@ struct avr_data {
 #ifdef CONFIG_HAS_EARLYSUSPEND
 	struct early_suspend early_suspend;
 #endif
-	int lcd_brightness;
-	enum led_brightness led_brightness;
-
 	int last_key;
 };
 
@@ -221,24 +218,20 @@ __ATTR(fw_check, S_IRUGO,get_avr_firmware, NULL);
 
 #endif
 
-// New backlight code handling via sysfs
-static int avr_backlight_get_intensity(struct backlight_device *bd)
-{
-	struct avr_data* data = dev_get_drvdata(&bd->dev);
-        return data->lcd_brightness;
-}
-
 // This should get merged into update_status
 static void avr_backlight_set_brightness(int value)
 {
 	uint8_t data_buf[2] = {0};
-	int count = 0, rc;
+	int count = 0, rc, avr_brightness;
 
 	/* This should go through bl_get_data() */
 	struct i2c_client *client = the_avr_data->client;
 
+	avr_brightness = (2 * value * AVR_BKL_MAX_LVL + MAX_BACKLIGHT_BRIGHTNESS)
+			/(2 * MAX_BACKLIGHT_BRIGHTNESS);
+
 	data_buf[0] = I2C_REG_BKL;
-	data_buf[1] = value;
+	data_buf[1] = avr_brightness;
 
 	while( count < 5 ){
 		rc = i2c_write(client, data_buf);
@@ -252,28 +245,14 @@ static void avr_backlight_set_brightness(int value)
 		}
 		count++;
 	}
-
-	the_avr_data->lcd_brightness = value;
 }
 
-static int avr_backlight_update_status(struct backlight_device *bd)
+static void avr_backlight_led_set(struct led_classdev *led_cdev,
+	                         enum led_brightness value)
 {
-	int brightness = bd->props.brightness;
-
-	if (bd->props.power != FB_BLANK_UNBLANK)
-		brightness = 0;
-
-	if (bd->props.fb_blank != FB_BLANK_UNBLANK)
-		brightness = 0;
-
-	avr_backlight_set_brightness(brightness);
-	return 0;
+	avr_backlight_set_brightness(value);
 }
 
-static struct backlight_ops avr_backlight_ops = {
-	.get_brightness = avr_backlight_get_intensity,
-	.update_status  = avr_backlight_update_status,
-};
 
 // New LEDs code sysfs handling
 static void avr_keypad_led_set(struct led_classdev *led_cdev,
@@ -281,25 +260,14 @@ static void avr_keypad_led_set(struct led_classdev *led_cdev,
 {
 	uint8_t data_buf[2] = {0};
 	int avr_brightness = AVR_LED_ON;
-	struct avr_data* data = container_of(led_cdev, struct avr_data, led_cdev);
+	struct avr_data* data = container_of(led_cdev, struct avr_data, led_keypad);
 
-	// By convention LED_FULL is 255, and we have 32 values.
-	// Recent kernels have max_brightness field, we don't, yet.
-	// We will use (value + 1) / 8 
-	//
-	avr_brightness = (value + 1) / 8;
+	avr_brightness = (2 * value * AVR_LED_MAX_LVL + MAX_LED_BRIGHTNESS)
+			/(2 * MAX_LED_BRIGHTNESS);
 
 	data_buf[0] = I2C_REG_LED_1;
 	data_buf[1] = avr_brightness;
 	i2c_write(data->client, data_buf);
-
-	data->led_brightness = value;
-}
-
-enum led_brightness avr_keypad_led_get(struct led_classdev *led_cdev)
-{
-	struct avr_data* data = container_of(led_cdev, struct avr_data, led_cdev);
-	return data->led_brightness;
 }
 
 static int __init avr_init(void)
@@ -322,8 +290,14 @@ static int avr_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	uint8_t data_buf[2] = {0};
 	int count = 0;
 	int rc;
-	struct backlight_device *bd;
 	struct avr_data *data;
+
+	pr_debug("[AVR] %s ++ entering\n", __FUNCTION__);
+
+	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
+		pr_err("[AVR] i2c_check_functionality error!\n");
+		return -ENOTSUPP;
+	}
 
 	data = kzalloc(sizeof(struct avr_data), GFP_KERNEL);
 
@@ -333,12 +307,6 @@ static int avr_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	data->client = client;
 	data->last_key = 1;
 
-	pr_debug("[AVR] %s ++ entering\n", __FUNCTION__);
-
-	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
-		pr_err("[AVR] i2c_check_functionality error!\n");
-		return -ENOTSUPP;
-	}
 	strlcpy(client->name, AVR_DRIVER_NAME, I2C_NAME_SIZE);
 	i2c_set_clientdata(client, data);
 
@@ -353,51 +321,47 @@ static int avr_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	data->input = input_allocate_device();
 	if (data->input == NULL) {
 		pr_err("[AVR] input_allocate_device error!\n");
-		return -ENOMEM;
+		err = -ENOMEM;
+		goto error_free;
 	}
 
 	err = avr_register_input(data->input);
 	if (err < 0) {
 		pr_err("[AVR] AVR_register_input error\n");
-		goto error;
+		goto error_input;
 	}
 
 	if (client->irq) {
 		err = request_irq(client->irq, avr_interrupt, IRQF_TRIGGER_FALLING,
 				  AVR_DRIVER_NAME, data);
 		if (err < 0) {
+			// seems to be not critical
 			pr_err("[AVR] request_irq error! %d\n", err);
 			free_irq(client->irq, data);
 		}
 	}
 
-	// New sysfs backlight code
-	bd = backlight_device_register("avr-backlight",
-			&client->dev, data, &avr_backlight_ops);
-	if (IS_ERR(bd)) {
-		goto error_avr_dev;
-	}
+	data->led_keypad.name = "button-backlight";
+	data->led_keypad.brightness_set = avr_keypad_led_set;
+	data->led_keypad.flags = LED_CORE_SUSPENDRESUME;
 
-	data->bd = bd;
+	data->led_bl.name = "lcd-backlight";
+	data->led_bl.brightness_set = avr_backlight_led_set;
+	data->led_bl.flags = LED_CORE_SUSPENDRESUME;
 
-	data->led_cdev.name = "avr::keypad";
-	data->led_cdev.brightness_set = avr_keypad_led_set;
-	data->led_cdev.brightness_get = avr_keypad_led_get;
-	data->led_cdev.flags = LED_CORE_SUSPENDRESUME;
-
-	bd->props.max_brightness = AVR_BKL_MAX_LVL;
-	bd->props.brightness = AVR_BKL_MAX_LVL;
-	// end of new sysfs backlight code
-
-	err = led_classdev_register(&client->dev, &data->led_cdev);
+	err = led_classdev_register(&client->dev, &data->led_keypad);
 	if (err < 0)
-		return err;
+		goto error_input;
+
+	err = led_classdev_register(&client->dev, &data->led_bl);
+	if (err < 0)
+		goto error_input;
 
 	// ioctl interface
 	err = misc_register(&avr_dev);
 	if (err) {
 		pr_err("avr_probe: avr_dev register failed\n");
-		goto error_avr_dev;
+		goto error_leds;
 	}
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
@@ -449,10 +413,14 @@ static int avr_probe(struct i2c_client *client, const struct i2c_device_id *id)
 
 	return 0;
 
+error_leds:
+	// unregister leds?
 error_avr_dev:
 	free_irq(client->irq, data);
-error:
+error_input:
 	input_free_device(data->input);
+error_free:
+	kfree(data);
 	pr_err("[AVR] probe error\n");
 	return err;
 }
@@ -463,8 +431,8 @@ static int avr_remove(struct i2c_client *client)
 	input_unregister_device(data->input);
 	free_irq(client->irq, data);
 	
-	backlight_device_unregister(data->bd);
-	led_classdev_unregister(&data->led_cdev);
+	led_classdev_unregister(&data->led_bl);
+	led_classdev_unregister(&data->led_keypad);
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
 	unregister_early_suspend(&data->early_suspend);
@@ -680,7 +648,6 @@ static int avr_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 	int err = 0;
 	uint8_t data_buf[2] = {0};
 	struct i2c_client *client = the_avr_data->client;
-	uint32_t bl_lvl;
 
 	/* check cmd */
 	if(_IOC_TYPE(cmd) != DEV_IOCTLID){
@@ -743,10 +710,8 @@ static int avr_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 		break;
 	case IOCTL_SET_BL_LV:
 		// Good enough :)
-		bl_lvl = (arg + 1) / 8;
-
-		avr_backlight_set_brightness(bl_lvl);
-		pr_debug("[AVR] IOCTL_SET_BL_LV, Set backlight 0x%02X. \n", bl_lvl);
+		avr_backlight_set_brightness(arg);
+		pr_debug("[AVR] IOCTL_SET_BL_LV, Set backlight %ld. \n", arg);
 		break;
 	case IOCTL_KEY_LOCK_TOGGLE:
 		data_buf[0] = I2C_REG_KEY_LOCK;
