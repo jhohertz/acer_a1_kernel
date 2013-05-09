@@ -24,66 +24,28 @@
 #include <linux/earlysuspend.h>
 #include <linux/fb.h>
 #include <linux/leds.h>
+#include <linux/mfd/avr.h>
 
-#define DEV_IOCTLID               0x11
-#define IOC_MAXNR                 18
-#define IOCTL_SET_BL_ON           _IOW(DEV_IOCTLID, 1, int)
-#define IOCTL_SET_BL_OFF          _IOW(DEV_IOCTLID, 2, int)
-#define IOCTL_SET_BL_LV           _IOW(DEV_IOCTLID, 3, int)
-#define IOCTL_SET_LED1_ON         _IOW(DEV_IOCTLID, 4, int)
-#define IOCTL_SET_LED1_OFF        _IOW(DEV_IOCTLID, 5, int)
-#define IOCTL_SET_LED2_ON         _IOW(DEV_IOCTLID, 6, int)
-#define IOCTL_SET_LED2_OFF        _IOW(DEV_IOCTLID, 7, int)
-#define IOCTL_KEY_LOCK_TOGGLE     _IOW(DEV_IOCTLID, 8, int)
-#define IOCTL_SET_LED_ON          _IOW(DEV_IOCTLID, 10, int)
-#define IOCTL_SET_LED_OFF         _IOW(DEV_IOCTLID, 11, int)
-#define IOCTL_SIMPLE_TEST_ON      _IOW(DEV_IOCTLID, 12, int)
-#define IOCTL_SIMPLE_TEST_OFF     _IOW(DEV_IOCTLID, 13, int)
-#define IOCTL_TEST_KEY            _IOW(DEV_IOCTLID, 15, int)
-#define IOCTL_TEST_KEY_UP         _IOW(DEV_IOCTLID, 16, int)
-#define IOCTL_TEST_KEY_DOWN       _IOW(DEV_IOCTLID, 17, int)
+#define DEV_IOCTLID		0x11
+#define IOC_MAXNR		18
+#define IOCTL_SET_BL_ON		_IOW(DEV_IOCTLID, 1, int)
+#define IOCTL_SET_BL_OFF	_IOW(DEV_IOCTLID, 2, int)
+#define IOCTL_SET_BL_LV		_IOW(DEV_IOCTLID, 3, int)
+#define IOCTL_SET_LED1_ON	_IOW(DEV_IOCTLID, 4, int)
+#define IOCTL_SET_LED1_OFF	_IOW(DEV_IOCTLID, 5, int)
+#define IOCTL_SET_LED2_ON	_IOW(DEV_IOCTLID, 6, int)
+#define IOCTL_SET_LED2_OFF	_IOW(DEV_IOCTLID, 7, int)
+#define IOCTL_KEY_LOCK_TOGGLE	_IOW(DEV_IOCTLID, 8, int)
+#define IOCTL_SET_LED_ON	_IOW(DEV_IOCTLID, 10, int)
+#define IOCTL_SET_LED_OFF	_IOW(DEV_IOCTLID, 11, int)
 
 #define AVR_DRIVER_NAME           "avr"
-
-#define MAX_BACKLIGHT_BRIGHTNESS  255
-#define MAX_LED_BRIGHTNESS  255
-/* Modify AVR_BKL_LVL for backlight level 30 to 255 */
-#define AVR_BKL_MAX_LVL           0x20
-#define AVR_BKL_MIN_LVL           0x01
-#define AVR_BKL_ON                AVR_BKL_MAX_LVL
-#define AVR_BKL_OFF               0x00
-#define I2C_REG_FW                0xD0
-#define I2C_REG_LED_1             0xD1
-// I2C_REG_LED_2 is unused
-#define I2C_REG_LED_2             0xD2
-#define I2C_REG_BKL               0xD3
-#define I2C_REG_KEY_STATUS        0xD4
-#define I2C_REG_KEY_LOCK          0xD8
-#define I2C_REG_LOW_POWER         0xD9
-#define AVR_LED_MAX_LVL           0x20
-#define AVR_LED_ON                AVR_LED_MAX_LVL
-#define AVR_LED_OFF               0x00
-#define AVR_POWER_NORMAL          0x00
-#define AVR_POWER_LOW             0x01
-
-/* AVR Keycode */
-#define AVR_KEY_MENU              (1<<0)
-#define AVR_KEY_LEFT              (1<<1)
-#define AVR_KEY_DOWN              (1<<2)
-#define AVR_KEY_RIGHT             (1<<3)
-#define AVR_KEY_BACK              (1<<4)
-#define AVR_KEY_UP                (1<<5)
-
-#define AVR_KEYMASK_DIRECTION     (AVR_KEY_UP|AVR_KEY_DOWN|AVR_KEY_LEFT|AVR_KEY_RIGHT)
 
 #define AVR_LED_DELAY_TIME        10000
 
 #define BACKLIGHT_LEVEL_ON        0x8
 
-/* AVR Sensitivity */
-#define USE_FS                    1
-#define I2C_REG_SENSITIVITY       0x60
-#define AVR_SENSITIVITY_DEFAULT   20
+#define AVR_I2C_RETRY_COUNT	5
 
 static int __init avr_init(void);
 static int avr_probe(struct i2c_client *client, const struct i2c_device_id *id);
@@ -91,35 +53,34 @@ static int avr_remove(struct i2c_client *client);
 static int avr_suspend(struct i2c_client *client, pm_message_t mesg);
 static int avr_resume(struct i2c_client *client);
 static irqreturn_t avr_interrupt(int irq, void *dev_id);
-static void avr_work_func(struct work_struct *work);
-static int __init avr_register_input(struct input_dev *input);
+static void avr_input_work_func(struct work_struct *work);
+static int __init avr_input_register(struct input_dev *input);
 static int avr_open(struct inode *inode, struct file *file);
 static int avr_close(struct inode *inode, struct file *file);
 static int avr_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned long arg);
-static int i2c_write(struct i2c_client *client, char *buf);
-static int i2c_read(struct i2c_client *client, char *buf, int count);
 static void led_on(struct i2c_client *client);
 static void led_off(struct i2c_client *client);
-static void low_power_mode(struct i2c_client *client, int mode);
-static void key_clear(struct i2c_client *client);
+static void avr_set_power_mode(struct i2c_client *client, int mode);
+static void avr_input_key_clear(struct device *dev);
 static void avr_led_work_func(struct work_struct *work);
 #ifdef CONFIG_HAS_EARLYSUSPEND
 static void avr_early_suspend(struct early_suspend *h);
 static void avr_early_resume(struct early_suspend *h);
 #endif
-static int kpd_fw = 0xff;
-static bool bsimple_test = false;
 static bool kpd_fw_check = false;
 static bool kpd_resume_check = true;
 static bool kpd_pwr_key_check = false;
 static struct mutex avr_mutex;
 static bool led_call = false;
 
+static int __avr_write(struct i2c_client* client, int reg, int val, int once);
+static int __avr_read(struct i2c_client* client, int *val, int once);
+static int __avr_query(struct i2c_client* client, int reg, int *val, int once);
+
 static const struct i2c_device_id avr_id[] = {
 	{ AVR_DRIVER_NAME, 0 },
 	{ }
 };
-
 
 /* Data for I2C driver */
 struct avr_data {
@@ -128,7 +89,7 @@ struct avr_data {
 	struct led_classdev led_bl;
 	struct led_classdev led_keypad;
 
-	struct work_struct work;
+	struct work_struct irq_work;
 	struct delayed_work led_work;
 
 	wait_queue_head_t wait;
@@ -137,6 +98,7 @@ struct avr_data {
 	struct early_suspend early_suspend;
 #endif
 	int last_key;
+	int keypad_firmware_version;
 };
 
 /* FIXME: This is required because of ioctl */
@@ -168,47 +130,170 @@ static struct miscdevice avr_dev = {
 	.fops = &avr_fops,
 };
 
-#if USE_FS
-static ssize_t set_avr_sensitivity(struct device *device,
-			   struct device_attribute *attr,
-			   const char *buf, size_t count)
+static int __avr_write(struct i2c_client* client, int reg, int val, int once)
 {
-	uint8_t data_buf[2] = { I2C_REG_SENSITIVITY, 0 };
-	struct avr_data* data = dev_get_drvdata(device);
+	int res = -1;
+	int retry = AVR_I2C_RETRY_COUNT;
+	uint8_t buf[2] = { (uint8_t)reg, (uint8_t)val };
+	int count = (val == -1) ? 1 : 2;
 
+	while (retry-- > 0) {
+		if (count == i2c_master_send(client, buf, count )) {
+			res = 0;
+			break;
+		}
+
+		if (once)
+			break;
+
+		msleep(200);
+	}
+
+	return res;
+}
+
+static int __avr_read(struct i2c_client* client, int* val, int once)
+{
+	int res = -1;
+	uint8_t response;
+	int retry = AVR_I2C_RETRY_COUNT;
+
+	while (retry-- > 0) {
+		if (1 == i2c_master_recv(client, &response, 1)) {
+			res = 0;
+			break;
+		}
+
+		if (once)
+			break;
+
+		msleep(200);
+	}
+
+	*val = response;
+
+	return res;
+}
+
+static int __avr_query(struct i2c_client* client, int reg, int *val, int once)
+{
+	if (__avr_write(client, reg, -1, once))
+		return -1;
+	if (__avr_read(client, val, once))
+		return -1;
+	return 0;
+}
+
+int avr_write(struct device* dev, int reg, int val, int once)
+{
+	return __avr_write(to_i2c_client(dev), reg, val, once);
+}
+EXPORT_SYMBOL_GPL(avr_write);
+
+int avr_read(struct device* dev, int* val, int once)
+{
+	return __avr_read(to_i2c_client(dev), val, once);
+}
+EXPORT_SYMBOL_GPL(avr_read);
+
+int avr_query(struct device* dev, int reg, int *val, int once)
+{
+	return __avr_query(to_i2c_client(dev), reg, val, once);
+}
+EXPORT_SYMBOL_GPL(avr_query);
+
+static void avr_set_power_mode(struct i2c_client *client, int mode){
+	if (avr_write(&client->dev, I2C_REG_LOW_POWER, mode, 0))
+		pr_err("%s: error setting mode", __func__);
+}
+
+/* LEDs */
+static void avr_backlight_led_set(struct led_classdev *led_cdev,
+	                         enum led_brightness value)
+{
+	int avr_brightness;
+	struct avr_data *data = container_of(led_cdev, struct avr_data, led_bl);
+
+	avr_brightness = (2 * value * AVR_BKL_MAX_LVL + MAX_BACKLIGHT_BRIGHTNESS)
+			/(2 * MAX_BACKLIGHT_BRIGHTNESS);
+
+	if (avr_write(&data->client->dev, I2C_REG_BKL, avr_brightness, 0))
+		pr_err("%s: Error setting LCD brightness\n", __func__);
+
+}
+
+static void avr_keypad_led_set(struct led_classdev *led_cdev,
+	                         enum led_brightness value)
+{
+	int avr_brightness;
+	struct avr_data *data = container_of(led_cdev, struct avr_data, led_keypad);
+
+	avr_brightness = (2 * value * AVR_LED_MAX_LVL + MAX_LED_BRIGHTNESS)
+			/(2 * MAX_LED_BRIGHTNESS);
+
+	if (avr_write(&data->client->dev, I2C_REG_LED_1, avr_brightness, 0))
+		pr_err("%s: Error setting keypad brightness\n", __func__);
+}
+
+static void led_on(struct i2c_client *client){
+	struct avr_data *data = i2c_get_clientdata(client);
+	avr_keypad_led_set(&data->led_keypad, 16);
+}
+
+static void led_off(struct i2c_client *client){
+	struct avr_data *data = i2c_get_clientdata(client);
+	avr_keypad_led_set(&data->led_keypad, AVR_LED_OFF);
+}
+
+static void avr_led_work_func(struct work_struct *work)
+{
+	struct delayed_work *led_work = container_of(work, struct delayed_work, work);
+	struct avr_data* data = container_of(led_work, struct avr_data, led_work);
+
+	led_off(data->client);
+	led_call = false;
+}
+
+/* Keypad */
+static ssize_t avr_set_keypad_sensitivity(struct device *device,
+					  struct device_attribute *attr,
+					  const char *buf, size_t count)
+{
 	int res;
 	long value;
+	struct avr_data *data = dev_get_drvdata(device);
 
-	if(!(kpd_fw>0x38))
+	if (!(data->keypad_firmware_version > 0x38))
 		return count;
 
 	res = strict_strtol(buf, 10, &value);
 	if (res) {
-	    // FIXME: check for range
+	    /* FIXME: check for range */
 	    pr_err("[AVR] strict_strol() failed for %s\n", buf);
 	    value = AVR_SENSITIVITY_DEFAULT; 
 	}
 
-	data_buf[1] = (int)value;
+	pr_info("[AVR] Threshold value = %ld\n", value);
 
-	pr_info("[AVR] Threshold value = %d\n",data_buf[1]);
-
-	if ( 0 != i2c_write(data->client, data_buf))
+	if ( 0 != avr_write(device, I2C_REG_SENSITIVITY, value, 0))
 		pr_err("[AVR] Set AVR threshold value error\n");
 
 	return count;
 }
 
 static struct device_attribute avr_attrs =
-__ATTR(threshold, S_IRWXUGO,NULL, set_avr_sensitivity);
+__ATTR(threshold, S_IRWXUGO,NULL, avr_set_keypad_sensitivity);
 
 static ssize_t get_avr_firmware(struct device *dev, struct device_attribute *attr,
              char *buf)
 {
 	int fw_check = 0xff;
-	fw_check = (kpd_fw>0x38) ? 1 : 0;
+	struct avr_data *data = dev_get_drvdata(dev);
 
-	pr_info("[AVR] Firmware ver=0x%02X, fw_check = %d\n", kpd_fw, fw_check);
+	fw_check = (data->keypad_firmware_version > 0x38) ? 1 : 0;
+
+	pr_info("[AVR] Firmware ver=0x%02X, fw_check = %d\n",
+		data->keypad_firmware_version, fw_check);
 
 	return sprintf(buf, "%d\n", fw_check);
 }
@@ -216,58 +301,113 @@ static ssize_t get_avr_firmware(struct device *dev, struct device_attribute *att
 static struct device_attribute avr_fw_attrs =
 __ATTR(fw_check, S_IRUGO,get_avr_firmware, NULL);
 
-#endif
-
-// This should get merged into update_status
-static void avr_backlight_set_brightness(int value)
+/* Keypad input */
+static int __init avr_input_register(struct input_dev *input)
 {
-	uint8_t data_buf[2] = {0};
-	int count = 0, rc, avr_brightness;
+	input->name = AVR_DRIVER_NAME;
+	input->id.bustype = BUS_I2C;
+	input->evbit[0] = BIT_MASK(EV_SYN)|BIT_MASK(EV_KEY);
+	input->keybit[BIT_WORD(KEY_HOME)] = BIT_MASK(KEY_HOME);
+	input->keybit[BIT_WORD(KEY_BACK)] = BIT_MASK(KEY_BACK)|BIT_MASK(KEY_MENU);
+	input->keybit[BIT_WORD(KEY_SEND)] |= BIT_MASK(KEY_SEND);
+	input->keybit[BIT_WORD(0xE5)] |= BIT_MASK(0xE5);
+	input->keybit[BIT_WORD(KEY_SEARCH)] |= BIT_MASK(KEY_SEARCH);
+	return input_register_device(input);
+}
 
-	/* This should go through bl_get_data() */
-	struct i2c_client *client = the_avr_data->client;
+static void avr_input_key_clear(struct device *dev)
+{
+	/* To prevent uP holding KEY_INT pin to low without getting value */
+	int dummy;
+	avr_query(dev, I2C_REG_KEY_STATUS, &dummy, 0);
+}
 
-	avr_brightness = (2 * value * AVR_BKL_MAX_LVL + MAX_BACKLIGHT_BRIGHTNESS)
-			/(2 * MAX_BACKLIGHT_BRIGHTNESS);
+static void avr_input_work_func(struct work_struct *work)
+{
+	struct avr_data* data = container_of(work, struct avr_data, irq_work);
+	struct i2c_client *client = data->client;
+	struct device *dev = &client->dev;
 
-	data_buf[0] = I2C_REG_BKL;
-	data_buf[1] = avr_brightness;
+	int key_st = 0;
+	int key_code = 0;
+	int count = 0;
+	int res = -1;
 
-	while( count < 5 ){
-		rc = i2c_write(client, data_buf);
+	mutex_lock(&avr_mutex);
 
-		if(rc){
-			/* Retry if i2c_read error */
+	/* Step 1. Scan Key */
+	while (count < 5) {
+		if (avr_query(dev, I2C_REG_KEY_STATUS, &key_st, 1)) {
+			if (count == 1) {
+				input_report_key(data->input, data->last_key, 0);
+				data->last_key = key_code;
+			}
 			msleep(200);
-		}else{
-			/* i2c_read success */
+		}
+		else {
+			res = 0;
 			break;
 		}
 		count++;
 	}
-}
 
-static void avr_backlight_led_set(struct led_classdev *led_cdev,
-	                         enum led_brightness value)
-{
-	avr_backlight_set_brightness(value);
-}
+	/* Step 2. Send Key event */
+	if(res == -1 || key_st == data->keypad_firmware_version || count > 1){
+		avr_input_key_clear(dev);
+		mutex_unlock(&avr_mutex);
+		return;
+	}
 
+	cancel_delayed_work(&data->led_work);
 
-// New LEDs code sysfs handling
-static void avr_keypad_led_set(struct led_classdev *led_cdev,
-	                         enum led_brightness value)
-{
-	uint8_t data_buf[2] = {0};
-	int avr_brightness = AVR_LED_ON;
-	struct avr_data* data = container_of(led_cdev, struct avr_data, led_keypad);
+	if ( key_st != 0)
+	{
+		led_on(client);
+		led_call = true;
+	}
+	else
+		schedule_delayed_work(&data->led_work, msecs_to_jiffies(AVR_LED_DELAY_TIME));
 
-	avr_brightness = (2 * value * AVR_LED_MAX_LVL + MAX_LED_BRIGHTNESS)
-			/(2 * MAX_LED_BRIGHTNESS);
+	switch(key_st){
+	case AVR_KEY_MENU:
+		key_code = KEY_HOME;
+		break;
+	case AVR_KEY_LEFT:
+		key_code = KEY_SEARCH;
+		break;
+	case AVR_KEY_RIGHT:
+		if (kpd_fw_check)
+		    key_code = 0xE5; /* MENU */
+		else
+		    key_code = KEY_BACK;
+		break;
+	case AVR_KEY_DOWN:
+		key_code = KEY_BACK;
+		break;
+	case AVR_KEY_BACK:
+		key_code = 0xE5;
+		break;
+	default:
+		key_code = 0;
+		break;
+	}
 
-	data_buf[0] = I2C_REG_LED_1;
-	data_buf[1] = avr_brightness;
-	i2c_write(data->client, data_buf);
+	pr_debug("%s: key_st=0x%x, key_code=0x%x, pre=0x%x\n",
+             __func__, key_st, key_code, data->last_key);
+
+	/* Send key release if not equal to last key */
+	if( key_code != data->last_key){
+		input_report_key(data->input, data->last_key, 0);
+	}
+	/* Send key press if key_code != 0 */
+	if( key_code ) {
+		input_report_key(data->input, key_code, 1);
+	}
+	/* TODO: Add pressed check for gesture or miss touch. */
+	data->last_key = key_code;
+	/* Step 2. End Send Key event */
+
+	mutex_unlock(&avr_mutex);
 }
 
 static int __init avr_init(void)
@@ -276,30 +416,28 @@ static int __init avr_init(void)
 
 	res = i2c_add_driver(&avr_driver);
 
-	if (res){
-		pr_err("[AVR]i2c_add_driver failed! \n");
-		return res;
-	}
+	if (res)
+		pr_err("%s: i2c_add_driver failed\n", __func__);
 
-	return 0;
+	return res;
 }
 
 static int avr_probe(struct i2c_client *client, const struct i2c_device_id *id)
 {
 	int err = 0;
-	uint8_t data_buf[2] = {0};
-	int count = 0;
-	int rc;
 	struct avr_data *data;
 
 	pr_debug("[AVR] %s ++ entering\n", __FUNCTION__);
 
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
-		pr_err("[AVR] i2c_check_functionality error!\n");
+		pr_err("%s: i2c_check_functionality failed\n", __func__);
 		return -ENOTSUPP;
 	}
 
-	data = kzalloc(sizeof(struct avr_data), GFP_KERNEL);
+	data = kzalloc(sizeof(*data), GFP_KERNEL);
+	if (IS_ERR(data)) {
+		return -ENOMEM;
+	}
 
 	// Sneaky-sneaky
 	the_avr_data = data;
@@ -312,7 +450,7 @@ static int avr_probe(struct i2c_client *client, const struct i2c_device_id *id)
 
 	mutex_init(&avr_mutex);
 
-	INIT_WORK(&data->work, avr_work_func);
+	INIT_WORK(&data->irq_work, avr_input_work_func);
 	init_waitqueue_head(&data->wait);
 
 	INIT_DELAYED_WORK(&data->led_work, avr_led_work_func);
@@ -325,17 +463,17 @@ static int avr_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		goto error_free;
 	}
 
-	err = avr_register_input(data->input);
+	err = avr_input_register(data->input);
 	if (err < 0) {
-		pr_err("[AVR] AVR_register_input error\n");
+		pr_err("[AVR] avr_input_register error\n");
 		goto error_input;
 	}
 
 	if (client->irq) {
-		err = request_irq(client->irq, avr_interrupt, IRQF_TRIGGER_FALLING,
+		err = request_irq(client->irq, avr_interrupt,
+				  IRQF_TRIGGER_FALLING,
 				  AVR_DRIVER_NAME, data);
 		if (err < 0) {
-			// seems to be not critical
 			pr_err("[AVR] request_irq error! %d\n", err);
 			free_irq(client->irq, data);
 		}
@@ -360,7 +498,7 @@ static int avr_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	// ioctl interface
 	err = misc_register(&avr_dev);
 	if (err) {
-		pr_err("avr_probe: avr_dev register failed\n");
+		pr_err("%s: avr_dev register failed\n", __func__);
 		goto error_leds;
 	}
 
@@ -372,34 +510,18 @@ static int avr_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	register_early_suspend(&data->early_suspend);
 #endif
 
-	avr_backlight_set_brightness(BACKLIGHT_LEVEL_ON);
+	avr_backlight_led_set(&data->led_bl, BACKLIGHT_LEVEL_ON);
 
-	/* Get keypad FW version */
-	data_buf[0] = I2C_REG_FW;
-	data_buf[1] = 0;
-
-	while( count < 5 ){
-		rc = i2c_read(client, data_buf, 1);
-		if (rc) {
-			/* Retry if i2c_read error */
-			msleep(200);
-		}else{
-			/* i2c_read success */
-			break;
-		}
-		count++;
-	}
-
-	if (rc) {
+	if (avr_query(&client->dev, I2C_REG_FW,
+		      &data->keypad_firmware_version, 0)) {
 		pr_err("[AVR] i2c_read fail\n");
 		goto error_avr_dev;
 	}
 
-	kpd_fw = data_buf[0];
 	/* To check keypad for Type Proposal_A  / Type Proposal_C (0x30) */
-	kpd_fw_check = (data_buf[0]>0x30) ? true : false;
+	kpd_fw_check = (data->keypad_firmware_version > 0x30) ? true : false;
 
-	pr_info("[AVR] Firmware ver=0x%02X\n", data_buf[0]);
+	pr_info("[AVR] Firmware ver=0x%02X\n", data->keypad_firmware_version);
 
 #if USE_FS
 	if(device_create_file(&client->dev, &avr_attrs))
@@ -430,7 +552,7 @@ static int avr_remove(struct i2c_client *client)
 	struct avr_data *data = i2c_get_clientdata(client);
 	input_unregister_device(data->input);
 	free_irq(client->irq, data);
-	
+
 	led_classdev_unregister(&data->led_bl);
 	led_classdev_unregister(&data->led_keypad);
 
@@ -451,9 +573,9 @@ static void avr_early_suspend(struct early_suspend *h)
 
 	led_call = false;
 	kpd_resume_check = false;
-	key_clear(data->client);
+	avr_input_key_clear(&data->client->dev);
 	disable_irq(data->client->irq);
-	low_power_mode(data->client,1);
+	avr_set_power_mode(data->client, AVR_POWER_LOW);
 
 	pr_info("[AVR] %s -- leaving\n", __FUNCTION__);
 }
@@ -463,7 +585,7 @@ static void avr_early_resume(struct early_suspend *h)
 	struct avr_data* data = container_of(h, struct avr_data, early_suspend);
 	pr_info("[AVR] %s ++ entering\n", __FUNCTION__);
 
-	low_power_mode(data->client, 0);
+	avr_set_power_mode(data->client, AVR_POWER_NORMAL);
 	enable_irq(data->client->irq);
 
 	kpd_resume_check = true;
@@ -491,142 +613,14 @@ static int avr_resume(struct i2c_client *client)
 	return 0;
 }
 
-static void avr_work_func(struct work_struct *work)
-{
-	struct avr_data* data = container_of(work, struct avr_data, work);
-	struct i2c_client *client = data->client;
-
-	uint8_t data_buf[2] = {0};
-	int key_st = 0;
-	int key_code = 0;
-	int count = 0;
-
-	mutex_lock(&avr_mutex);
-
-	/* Step 1. Scan Key */
-	data_buf[0] = I2C_REG_KEY_STATUS;
-	data_buf[1] = 0;
-
-	while( count < 5 ){
-		if ( i2c_read(client, data_buf, 1) ) {
-			if (count == 1){
-				input_report_key(data->input, data->last_key, 0);
-				data->last_key = key_code;
-			}
-			/* Retry if i2c_read error */
-			msleep(200);
-		}else{
-			/* i2c_read success */
-			break;
-		}
-		count++;
-	}
-	/* Step 1. End Scan key */
-
-	/* Step 2. Send Key event */
-	key_st = data_buf[0];
-
-	// WTF???
-	if(key_st == I2C_REG_KEY_STATUS || key_st == kpd_fw || count > 1){
-		key_clear(client);
-		mutex_unlock(&avr_mutex);
-		return;
-	}
-
-	cancel_delayed_work(&data->led_work);
-
-	if ( key_st != 0)
-	{
-		led_on(client);
-		led_call = true;
-	}
-	else
-		schedule_delayed_work(&data->led_work, msecs_to_jiffies(AVR_LED_DELAY_TIME));
-
-	if(kpd_fw_check) {
-		switch(key_st){
-		case AVR_KEY_MENU:
-			if(!bsimple_test)
-				key_code = KEY_HOME;
-			else
-				key_code = KEY_SEND;
-			break;
-		case AVR_KEY_LEFT:
-			key_code = KEY_SEARCH;
-			break;
-		case AVR_KEY_DOWN:
-			key_code = KEY_BACK;
-			break;
-		case AVR_KEY_RIGHT:
-			key_code = 0xE5; /* MENU */
-			break;
-		default:
-			key_code = 0;
-			break;
-		}
-	}
-	else {
-		switch(key_st){
-		case AVR_KEY_MENU:
-			if(!bsimple_test)
-				key_code = KEY_HOME;
-			else
-				key_code = KEY_SEND;
-			break;
-		case AVR_KEY_LEFT:
-			key_code = KEY_SEARCH;
-			break;
-		case AVR_KEY_RIGHT:
-			key_code = KEY_BACK;
-			break;
-		case AVR_KEY_BACK:
-			key_code = 0xE5; /* MENU */
-			break;
-		default:
-			key_code = 0;
-			break;
-		}
-	}
-
-	pr_debug("%s: key_st=0x%x, key_code=0x%x, pre=0x%x\n",
-             __func__, key_st, key_code, data->last_key);
-
-	/* Send key release if not equal to last key */
-	if( key_code != data->last_key){
-		input_report_key(data->input, data->last_key, 0);
-	}
-	/* Send key press if key_code != 0 */
-	if( key_code ) {
-		input_report_key(data->input, key_code, 1);
-	}
-	/* TODO: Add pressed check for gesture or miss touch. */
-	data->last_key = key_code;
-	/* Step 2. End Send Key event */
-
-	mutex_unlock(&avr_mutex);
-}
-
 static irqreturn_t avr_interrupt(int irq, void *dev_id)
 {
 	/* TODO: Remove mdelay() to prevent listening */
 	/*       music delay on BT Headset via A2DP   */
 	disable_irq(irq);
-	schedule_work(&the_avr_data->work);
+	schedule_work(&the_avr_data->irq_work);
 	enable_irq(irq);
 	return IRQ_HANDLED;
-}
-
-static int __init avr_register_input(struct input_dev *input)
-{
-	input->name = AVR_DRIVER_NAME;
-	input->id.bustype = BUS_I2C;
-	input->evbit[0] = BIT_MASK(EV_SYN)|BIT_MASK(EV_KEY);
-	input->keybit[BIT_WORD(KEY_HOME)] = BIT_MASK(KEY_HOME);
-	input->keybit[BIT_WORD(KEY_BACK)] = BIT_MASK(KEY_BACK)|BIT_MASK(KEY_MENU);
-	input->keybit[BIT_WORD(KEY_SEND)] |= BIT_MASK(KEY_SEND);
-	input->keybit[BIT_WORD(0xE5)] |= BIT_MASK(0xE5);
-	input->keybit[BIT_WORD(KEY_SEARCH)] |= BIT_MASK(KEY_SEARCH);
-	return input_register_device(input);
 }
 
 /* open command for AVR device file	*/
@@ -646,7 +640,6 @@ static int avr_close(struct inode *inode, struct file *file)
 static int avr_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned long arg)
 {
 	int err = 0;
-	uint8_t data_buf[2] = {0};
 	struct i2c_client *client = the_avr_data->client;
 
 	/* check cmd */
@@ -674,14 +667,6 @@ static int avr_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 
 	/* cmd mapping */
 	switch(cmd){
-	case IOCTL_SIMPLE_TEST_ON:
-		bsimple_test = true;
-		pr_debug("[AVR] IOCTL_bSIMPLE_TEST_ON. \n");
-		break;
-	case IOCTL_SIMPLE_TEST_OFF:
-		bsimple_test = false;
-		pr_debug("[AVR] IOCTL_bSIMPLE_TEST_ON. \n");
-		break;
 	case IOCTL_SET_LED_ON:
 		if(led_call){
 			led_call = false;
@@ -701,43 +686,22 @@ static int avr_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 		pr_debug("[AVR] IOCTL_SET_LED_OFF.\n");
 		break;
 	case IOCTL_SET_BL_ON:
-		avr_backlight_set_brightness(AVR_BKL_ON);
+		avr_backlight_led_set(&the_avr_data->led_bl, AVR_BKL_ON);
 		pr_debug("[AVR] IOCTL_SET_BL_ON. \n");
 		break;
 	case IOCTL_SET_BL_OFF:
-		avr_backlight_set_brightness(AVR_BKL_OFF);
+		avr_backlight_led_set(&the_avr_data->led_bl, AVR_BKL_OFF);
 		pr_debug("[AVR] IOCTL_SET_BL_OFF. \n");
 		break;
 	case IOCTL_SET_BL_LV:
-		// Good enough :)
-		avr_backlight_set_brightness(arg);
+		avr_backlight_led_set(&the_avr_data->led_bl, arg);
 		pr_debug("[AVR] IOCTL_SET_BL_LV, Set backlight %ld. \n", arg);
 		break;
 	case IOCTL_KEY_LOCK_TOGGLE:
-		data_buf[0] = I2C_REG_KEY_LOCK;
-		data_buf[1] = (unsigned int)arg;
-		if(data_buf[1] != 0 || data_buf[1] != 1){
-			data_buf[1]=0;
+		if(arg != 0 || arg != 1){
+			arg = 0;
 		}
-		i2c_write(client, data_buf);
-		break;
-	case IOCTL_TEST_KEY:
-		/* if touch locked, unlock it!. */
-		data_buf[0] = I2C_REG_KEY_STATUS;
-		data_buf[1] = (unsigned int)arg;
-		if(data_buf[1] <= 0 || data_buf[1] >= 0x80){
-			data_buf[1] = 0;
-		}
-		i2c_write(client, data_buf);
-		pr_debug("[AVR] IOCTL_TEST_KEY, Set key as 0x%02X. \n", data_buf[1]);
-		return err;
-	case IOCTL_TEST_KEY_UP:
-		pr_debug("[AVR] IOCTL_TEST_KEY_UP, KEY %d UP! \n", (unsigned int)arg);
-		input_report_key(the_avr_data->input, (unsigned int)arg, 0);
-		break;
-	case IOCTL_TEST_KEY_DOWN:
-		pr_debug("[AVR] IOCTL_TEST_KEY_DOWN, KEY %d DOWN! \n", (unsigned int)arg);
-		input_report_key(the_avr_data->input, (unsigned int)arg, 1);
+		avr_write(&client->dev, I2C_REG_KEY_LOCK, (int)arg, 0);
 		break;
 	default:
 		return -1;
@@ -749,93 +713,6 @@ static int avr_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 static void __exit avr_exit(void)
 {
 	i2c_del_driver(&avr_driver);
-}
-
-/*
- * client: target client
- * buf: target register
- * count: length of response
- */
-static int i2c_read(struct i2c_client *client, char *buf, int count)
-{
-	/* Send target reg. info. */
-	if(1 != i2c_master_send(client, buf, 1)){
-		return -1;
-	}
-
-	/* Get response data and set to buf */
-	if(count != i2c_master_recv(client, buf, count)){
-		return -1;
-	}
-	return 0;
-}
-
-/*
- * client: target client
- * buf: target register with command
- */
-static int i2c_write(struct i2c_client *client, char *buf)
-{
-	/* buf[0] -> target reg. info. */
-	/* buf[1] -> cmd */
-	if(2 != i2c_master_send(client, buf, 2)){
-		return -1;
-	}
-	return 0;
-}
-
-static void led_on(struct i2c_client *client){
-	uint8_t data_buf[2] = {0};
-
-	data_buf[0] = I2C_REG_LED_1;
-	data_buf[1] = 0x2; // Low power
-	i2c_write(client, data_buf);
-}
-
-static void led_off(struct i2c_client *client){
-	uint8_t data_buf[2] = {0};
-
-	data_buf[0] = I2C_REG_LED_1;
-	data_buf[1] = AVR_LED_OFF;
-	i2c_write(client, data_buf);
-}
-
-static void low_power_mode(struct i2c_client *client, int mode){
-	uint8_t data_buf[2] = {0};
-
-	if (mode) {
-		data_buf[0] = I2C_REG_LOW_POWER;
-		data_buf[1] = AVR_POWER_LOW;
-		i2c_write(client, data_buf);
-		pr_debug("[AVR] Enter Low Power\n");
-	} else {
-		data_buf[0] = I2C_REG_LOW_POWER;
-		data_buf[1] = AVR_POWER_NORMAL;
-		i2c_write(client, data_buf);
-		pr_debug("[AVR] Enter Normal power\n");
-	}
-}
-
-static void key_clear(struct i2c_client *client)
-{
-	/* To prevent uP holding KEY_INT pin to low without getting value */
-	uint8_t data_buf[2] = {0};
-
-	data_buf[0] = I2C_REG_KEY_STATUS;
-	data_buf[1] = 0;
-	i2c_read(client, data_buf, 1);
-
-	pr_debug("[AVR] Clear Key Value.\n");
-}
-
-static void avr_led_work_func(struct work_struct *work)
-{
-	// to_delayed_work()
-	struct delayed_work *led_work = container_of(work, struct delayed_work, work);
-	struct avr_data* data = container_of(led_work, struct avr_data, led_work);
-
-	led_off(data->client);
-	led_call = false;
 }
 
 module_init(avr_init);
