@@ -1,6 +1,9 @@
 #ifndef __LINUX_MFD_AVR_H
 #define __LINUX_MFD_AVR_H
 
+#include <linux/notifier.h>
+#include <linux/mfd/core.h>
+
 /* Registers */
 #define I2C_REG_FW		0xD0
 #define I2C_REG_LED_1		0xD1
@@ -16,32 +19,26 @@
 #define AVR_POWER_NORMAL	0x00
 #define AVR_POWER_LOW		0x01
 
-/* LCD Backlight */
-#define MAX_BACKLIGHT_BRIGHTNESS  255
-#define AVR_BKL_MAX_LVL		0x20
-#define AVR_BKL_MIN_LVL		0x01
-#define AVR_BKL_ON		AVR_BKL_MAX_LVL
-#define AVR_BKL_OFF		0x00
+/* Notifiers */
+#define AVR_EVENT_IRQ		1
+#define AVR_EVENT_EARLYSUSPEND	2
+#define AVR_EVENT_LATERESUME	3
 
-/* Kepad LEDs */
-#define MAX_LED_BRIGHTNESS	255
-#define AVR_LED_MAX_LVL		0x20
-#define AVR_LED_ON		AVR_LED_MAX_LVL
-#define AVR_LED_OFF		0x00
+struct avr_chip;
 
-/* Keypad keycodes */
-#define AVR_KEY_MENU              (1<<0)
-#define AVR_KEY_LEFT              (1<<1)
-#define AVR_KEY_DOWN              (1<<2)
-#define AVR_KEY_RIGHT             (1<<3)
-#define AVR_KEY_BACK              (1<<4)
-#define AVR_KEY_UP                (1<<5)
+struct avr_platform_data {
+    int (*platform_init) (void);
+    int num_subdevs;
+    struct mfd_cell *sub_devices;
+};
 
-/* Keypad sensitivity */
-#define AVR_SENSITIVITY_DEFAULT   20
+int avr_write(struct avr_chip* chip, int reg, uint8_t val, int once);
+int avr_read(struct avr_chip* chip, uint8_t *val, int once);
+int avr_query(struct avr_chip* chip, int reg, uint8_t *val, int once);
 
-int avr_write(struct device* dev, int reg, int val, int once);
-int avr_read(struct device* dev, int *val, int once);
-int avr_query(struct device* dev, int reg, int *val, int once);
+void avr_notify_register(struct avr_chip* chip, struct notifier_block *nb);
+void avr_notify_unregister(struct avr_chip* chip, struct notifier_block *nb);
+
+int avr_get_firmware_version(struct avr_chip *chip);
 
 #endif // __LINUX_MFD_AVR_H

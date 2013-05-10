@@ -113,6 +113,10 @@
 #include <linux/usb/android.h>
 #endif
 
+#ifdef CONFIG_AVR
+#include <linux/mfd/avr.h>
+#endif
+
 #if defined(CONFIG_MOUSE_MSM_TOUCHPAD)
 #define TOUCHPAD_SUSPEND 	34
 #define TOUCHPAD_IRQ 		38
@@ -1338,37 +1342,45 @@ static struct platform_device msm_audio_device = {
 	.resource       = msm_audio_resources,
 };
 
-static void __init avr_gpio_init(void)
+#ifdef CONFIG_AVR
+static struct mfd_cell avr_subdevs[] = {
+	{
+		.name	= "avr-keypad",
+	},
+	{
+		.name	= "avr-led",
+	},
+};
+
+static int avr_gpio_setup(void)
 {
 	int rc;
-#if defined(CONFIG_MACH_Q8K_A1_EVT)
-	/* The H/W configuration setting for A1 v0.1 */
-	const int avr_en_pin = 91;
-#else
+
 	/* The H/W configuration setting for A1 v0.2 */
 	const int avr_en_pin = 27;
-#endif
 	rc = gpio_request(avr_en_pin, "AVR_EN");
 
-	if(rc){
+	if (rc){
 		pr_err("AVR gpio_request failed on pin %d (rc=%d)\n", avr_en_pin, rc);
-		return ;
+		return -1;
 	}
 
 	/* Set avr_en_pin as output high */
 	gpio_direction_output(avr_en_pin,1);
 	mdelay(100);
-#if defined(CONFIG_MACH_Q8K_A1_EVT)
-	gpio_direction_output(29,1);
-	mdelay(100);
-#endif
 
-	if(gpio_get_value(avr_en_pin) == 1){
-		pr_info("AVR gpio init done.\n");
-	}else{
-		pr_err("AVR gpio init failed!\n");
-	}
+	if (gpio_get_value(avr_en_pin) != 1)
+		return -1;
+
+	return 0;
 }
+
+static struct avr_platform_data avr_pdata = {
+	.platform_init	= avr_gpio_setup,
+	.num_subdevs	= ARRAY_SIZE(avr_subdevs),
+	.sub_devices	= avr_subdevs,
+};
+#endif // CONFIG_AVR
 
 #if defined(CONFIG_MS3C)
 static void __init compass_gpio_init(void)
@@ -2193,6 +2205,7 @@ static struct i2c_board_info msm_i2c_board_info[] __initdata = {
 	{
 		I2C_BOARD_INFO("avr", 0x66),
 		.irq = MSM_GPIO_TO_INT(145),
+		.platform_data = &avr_pdata,
 	},
 #endif
 #if defined(CONFIG_BOSCH_SMB380)
@@ -3349,9 +3362,6 @@ static void __init qsd8x50_init(void)
 	msm_device_i2c_init();
 #ifdef CONFIG_SPI
 	msm_qsd_spi_init();
-#endif
-#if defined(CONFIG_AVR) || defined(CONFIG_TOUCHSCREEN_AUO_H353)
-	avr_gpio_init();
 #endif
 #if defined(CONFIG_MS3C)
 	compass_gpio_init();

@@ -46,3 +46,5 @@ obj-$(CONFIG_MFD_PCF50633)	+= pcf50633-core.o
 obj-$(CONFIG_PCF50633_ADC)	+= pcf50633-adc.o
 obj-$(CONFIG_PCF50633_GPIO)	+= pcf50633-gpio.o
 obj-$(CONFIG_PMIC8058)		+= pmic8058.o
+
+obj-$(CONFIG_AVR)		+= avr.o

@@ -27,6 +27,7 @@ obj-$(CONFIG_LEDS_MSM_PMIC)		+= leds-msm-pmic.o
 obj-$(CONFIG_LEDS_DA903X)		+= leds-da903x.o
 obj-$(CONFIG_LEDS_WM8350)		+= leds-wm8350.o
 obj-$(CONFIG_LEDS_TCA6507)		+= leds-tca6507.o
+obj-$(CONFIG_LEDS_AVR)			+= leds-avr.o	
 
 # LED Triggers
 obj-$(CONFIG_LEDS_TRIGGER_TIMER)	+= ledtrig-timer.o
