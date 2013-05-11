@@ -36,8 +36,8 @@ int avr_write(struct avr_chip* chip, int reg, uint8_t val, int once);
 int avr_read(struct avr_chip* chip, uint8_t *val, int once);
 int avr_query(struct avr_chip* chip, int reg, uint8_t *val, int once);
 
-void avr_notify_register(struct avr_chip* chip, struct notifier_block *nb);
-void avr_notify_unregister(struct avr_chip* chip, struct notifier_block *nb);
+int avr_notify_register(struct avr_chip* chip, struct notifier_block *nb);
+int avr_notify_unregister(struct avr_chip* chip, struct notifier_block *nb);
 
 int avr_get_firmware_version(struct avr_chip *chip);
 
