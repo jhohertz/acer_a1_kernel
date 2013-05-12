@@ -33,4 +33,6 @@ obj-$(CONFIG_PMIC8058_PWM) += pmic8058-pwm.o
 
 obj-$(CONFIG_APANIC)		+= apanic.o
 
+# These will be removed once userspace is updated
 obj-$(CONFIG_AVR_DUMMY)		+= avr_dummy.o
+obj-$(CONFIG_TCA6507_DUMMY) += tca6507_dummy.o

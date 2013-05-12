@@ -10,7 +10,7 @@ menuconfig NEW_LEDS
 if NEW_LEDS
 
 config LEDS_CLASS
-	tristate "LED Class Support"
+	bool "LED Class Support"
 	help
 	  This option enables the led sysfs class in /sys/class/leds.  You'll
 	  need this to do anything useful with LEDs.  If unsure, say N.
@@ -195,11 +195,12 @@ config LEDS_MSM_PMIC
 	  for example SURF and FFAs.
 
 config LEDS_TCA6507
-        tristate "LED Support for TCA6507 I2C chips"
-        depends on LEDS_CLASS && I2C
-        help
-          This option enables support for LEDs connected to TCA6507
-          LED driver chips accessed via the I2C bus.
+	tristate "LED Support for TCA6507 I2C chip"
+	depends on LEDS_CLASS && I2C
+	help
+	  This option enables support for LEDs connected to TC6507
+	  LED driver chips accessed via the I2C bus.
+	  Driver support brightness control and hardware-assisted blinking.
 
 comment "LED Triggers"
 

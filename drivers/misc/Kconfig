@@ -302,6 +302,13 @@ config PMIC8058_PWM
 	  purposes including software controlled brightness of backlight,
 	  motor control, and waveform generation.
 
+config TCA6507_DUMMY
+	tristate "Dummy /dev/tca6507 module"
+	default y
+	help
+	  This module provides dummy /dev/tca6507 device to prevent
+	  Acer A1 crashes.
+
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
 source "drivers/misc/video_core/720p/Kconfig"
