@@ -33,3 +33,5 @@ obj-$(CONFIG_PMIC8058_PWM) += pmic8058-pwm.o
 
 obj-$(CONFIG_APANIC)		+= apanic.o
 
+obj-$(CONFIG_TCA6507_DUMMY) += tca6507_dummy.o
+
