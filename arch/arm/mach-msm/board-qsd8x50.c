@@ -2131,6 +2131,25 @@ static struct msm_i2ckbd_platform_data msm_kybd_data = {
 };
 #endif //def CONFIG_KEYBOARD_I2C_MSM
 
+#ifdef CONFIG_LEDS_TCA6507
+static struct led_info tca6507_leds[] = {
+	[0] = {
+		.name = "missed_call",
+	},
+	[1] = {
+		.name = "notifications",
+	},
+	[2] = {
+		.name = "battery",
+	},
+};
+
+static struct led_platform_data tca6507_leds_pdata = {
+	.num_leds	= 3,
+	.leds		= tca6507_leds,
+};
+#endif // CONFIG_LEDS_TCA6507
+
 static struct i2c_board_info msm_i2c_board_info[] __initdata = {
 #ifdef CONFIG_MOUSE_MSM_TOUCHPAD
 	{
@@ -2209,7 +2228,8 @@ static struct i2c_board_info msm_i2c_board_info[] __initdata = {
 #endif //defined(CONFIG_SENSORS_ISL29018)
 #if defined(CONFIG_LEDS_TCA6507)
 	{
-		I2C_BOARD_INFO("tca6507", 0x45),
+		I2C_BOARD_INFO("leds-tca6507", 0x45),
+		.platform_data  = &tca6507_leds_pdata,
 	},
 #endif
 #if defined(CONFIG_AUDIO_FM2018)
