@@ -113,6 +113,10 @@
 #include <linux/usb/android.h>
 #endif
 
+#ifdef CONFIG_LEDS_TCA6507
+#include <linux/leds-tca6507.h>
+#endif
+
 #if defined(CONFIG_MOUSE_MSM_TOUCHPAD)
 #define TOUCHPAD_SUSPEND 	34
 #define TOUCHPAD_IRQ 		38
@@ -2132,22 +2136,38 @@ static struct msm_i2ckbd_platform_data msm_kybd_data = {
 #endif //def CONFIG_KEYBOARD_I2C_MSM
 
 #ifdef CONFIG_LEDS_TCA6507
+#define TCA6507_GPIO 33
 static struct led_info tca6507_leds[] = {
 	[0] = {
-		.name = "missed_call",
+		.name = "notifications",
 	},
 	[1] = {
-		.name = "notifications",
+		.name = "missed_call",
 	},
 	[2] = {
 		.name = "battery",
 	},
 };
 
-static struct led_platform_data tca6507_leds_pdata = {
-	.num_leds	= 3,
-	.leds		= tca6507_leds,
+static void tca6507_setup(void) {
+	int rc;
+
+	rc = gpio_request(TCA6507_GPIO, "TCA6507_EN");
+	if (rc) {
+		pr_err("Could not request TCA6507 GPIO");
+		return;
+	}
+
+	gpio_direction_output(TCA6507_GPIO, 1);
 };
+
+static struct tca6507_platform_data tca6507_leds_pdata = {
+	.leds = {	
+		.num_leds	= 7,
+		.leds		= tca6507_leds,
+	}
+};
+
 #endif // CONFIG_LEDS_TCA6507
 
 static struct i2c_board_info msm_i2c_board_info[] __initdata = {
@@ -2228,7 +2248,7 @@ static struct i2c_board_info msm_i2c_board_info[] __initdata = {
 #endif //defined(CONFIG_SENSORS_ISL29018)
 #if defined(CONFIG_LEDS_TCA6507)
 	{
-		I2C_BOARD_INFO("leds-tca6507", 0x45),
+		I2C_BOARD_INFO("tca6507", 0x45),
 		.platform_data  = &tca6507_leds_pdata,
 	},
 #endif
@@ -3372,6 +3392,9 @@ static void __init qsd8x50_init(void)
 #endif
 #if defined(CONFIG_AVR) || defined(CONFIG_TOUCHSCREEN_AUO_H353)
 	avr_gpio_init();
+#endif
+#ifdef CONFIG_LEDS_TCA6507
+	tca6507_setup();
 #endif
 #if defined(CONFIG_MS3C)
 	compass_gpio_init();
