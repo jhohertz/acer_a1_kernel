@@ -1,9 +1,14 @@
 /*
  * LED driver for Acer A1 AVR driven LEDs.
  * 
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
+ * This software is licensed under the terms of the GNU General Public
+ * License version 2, as published by the Free Software Foundation, and
+ * may be copied, distributed, and modified under those terms.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  *
  */
 
@@ -39,7 +44,7 @@
 
 #define AVR_CHANGE_FLAG		(1 << 8)
 
-struct mutex avr_led_mutex;
+struct mutex avr_led_lock;
 
 struct avr_led {
 	struct avr_chip *chip;
@@ -61,7 +66,7 @@ static void avr_led_work(struct work_struct *work)
 	int avr_brightness;
 	int value;
 
-	mutex_lock(&avr_led_mutex);
+	mutex_lock(&avr_led_lock);
 
 	dev_dbg(led->dev, "%s: called\n", __func__);
 
@@ -91,7 +96,7 @@ static void avr_led_work(struct work_struct *work)
 	    led->keypad_brightness = value;
 	}
 
-	mutex_unlock(&avr_led_mutex);
+	mutex_unlock(&avr_led_lock);
 }
 
 static void avr_led_backlight_set(struct led_classdev *led_cdev,
@@ -188,7 +193,7 @@ static int avr_led_probe(struct platform_device *pdev)
 
 	INIT_WORK(&led->work, avr_led_work);
 
-	mutex_init(&avr_led_mutex);
+	mutex_init(&avr_led_lock);
 
 	led_set_brightness(&led->bl, DEFAULT_BACKLIGHT_BRIGHTNESS);
 	led_set_brightness(&led->keypad, DEFAULT_LED_BRIGHTNESS);

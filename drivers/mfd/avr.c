@@ -3,10 +3,14 @@
  *
  * Based on avr.c by Elay Hu <Elay_Hu@acer.com.tw>
  *
- *  This program is free software; you can redistribute  it and/or modify it
- *  under  the terms of  the GNU General  Public License as published by the
- *  Free Software Foundation;  either version 2 of the  License, or (at your
- *  option) any later version.
+ * This software is licensed under the terms of the GNU General Public
+ * License version 2, as published by the Free Software Foundation, and
+ * may be copied, distributed, and modified under those terms.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  *
  */
 
@@ -55,7 +59,7 @@ static void avr_early_suspend(struct early_suspend *h);
 static void avr_late_resume(struct early_suspend *h);
 #endif
 
-static struct mutex avr_query_mutex;
+static struct mutex avr_query_lock;
 
 static int __avr_write(struct avr_chip* client, int reg, uint8_t val, int once);
 static int __avr_read(struct avr_chip* client, uint8_t *val, int once);
@@ -153,14 +157,14 @@ static int __avr_read(struct avr_chip *chip, uint8_t *val, int once)
 static int __avr_query(struct avr_chip *chip, int reg, uint8_t *val, int once)
 {
 	int rc = -1;
-	mutex_lock(&avr_query_mutex);
+	mutex_lock(&avr_query_lock);
 	if (__avr_write(chip, reg, -1, once))
 		goto out;
 	if (__avr_read(chip, val, once))
 		goto out;
 	rc = 0;
 out:
-	mutex_unlock(&avr_query_mutex);
+	mutex_unlock(&avr_query_lock);
 	return rc;
 }
 
@@ -274,7 +278,7 @@ static int avr_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	strlcpy(client->name, AVR_DRIVER_NAME, I2C_NAME_SIZE);
 	i2c_set_clientdata(client, chip);
 
-	mutex_init(&avr_query_mutex);
+	mutex_init(&avr_query_lock);
 
 	INIT_WORK(&chip->irq_work, avr_irq_work_func);
 	init_waitqueue_head(&chip->wait);
