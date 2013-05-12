@@ -170,7 +170,7 @@ static int avr_led_probe(struct platform_device *pdev)
 	led->dev	= &pdev->dev;
 	led->chip	= chip;
 
-        led->keypad.name = "button-backlight";
+        led->keypad.name = "keyboard-backlight";
         led->keypad.brightness_set = avr_led_keypad_set;
         led->keypad.brightness_get = avr_led_keypad_get;
         led->keypad.flags = LED_CORE_SUSPENDRESUME;
