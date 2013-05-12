@@ -1,3 +1,17 @@
+/*
+ * Input driver for Acer A1 AVR driven capacitive keypad.
+ *
+ * This software is licensed under the terms of the GNU General Public
+ * License version 2, as published by the Free Software Foundation, and
+ * may be copied, distributed, and modified under those terms.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ */
+
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/input.h>
@@ -6,7 +20,7 @@
 #include <linux/notifier.h>
 #include <linux/mfd/avr.h>
 
-struct mutex avr_keypad_mutex;
+struct mutex avr_keypad_lock;
 
 /* Keypad keycodes */
 #define AVR_KEY_MENU		(1<<0)
@@ -17,7 +31,10 @@ struct mutex avr_keypad_mutex;
 #define AVR_KEY_UP		(1<<5)
 
 /* Keypad sensitivity */
-#define AVR_SENSITIVITY_DEFAULT   20
+#define AVR_KEYPAD_THRESHOLD_DEFAULT	20
+
+#define AVR_KEYPAD_THRESHOLD_MIN	0
+#define AVR_KEYPAD_THRESHOLD_MAX	42
 
 #define AVR_KEYPAD_DRIVER_NAME	"avr-keypad"
 
@@ -46,50 +63,68 @@ struct avr_keypad {
 	struct notifier_block   notifier;
 
 	bool	sensitivity_cap; 
-	uint8_t sensitivity;
+	uint8_t threshold;
 
 	int last_key;
 };
 
-static ssize_t avr_keypad_set_sensitivity(struct device *device,
-					  struct device_attribute *attr,
-					  const char *buf, size_t count)
+int avr_keypad_threshold_update(struct avr_keypad *keypad,
+				  int value)
 {
-	int res;
-	long value;
-	struct avr_keypad *keypad = dev_get_drvdata(device);
-	struct avr_chip *chip = keypad->chip;
-
 	if (!keypad->sensitivity_cap)
-	      return count;
+		return 0;
 
-	res = strict_strtol(buf, 10, &value);
-	if (res) {
-	    /* FIXME: check for range */
-	    pr_err("%s: invalid value %s\n", __func__, buf);
-	    value = AVR_SENSITIVITY_DEFAULT; 
+	if (value < AVR_KEYPAD_THRESHOLD_MIN ||
+	    value > AVR_KEYPAD_THRESHOLD_MAX) {
+		dev_err(keypad->dev, "%s: value %d out of range %d-%d\n",
+			__func__, value, AVR_KEYPAD_THRESHOLD_MIN,
+			AVR_KEYPAD_THRESHOLD_MAX);
+		return -1;
 	}
 
-	if ( 0 != avr_write(chip, I2C_REG_SENSITIVITY, (uint8_t)value, 0)) {
+	if ( 0 != avr_write(keypad->chip, I2C_REG_SENSITIVITY, (uint8_t)value, 0)) {
 		pr_err("%s: AVR threshold value error\n", __func__);
 		return -1;
 	}
 
-	keypad->sensitivity = (uint8_t)value;
+	keypad->threshold = (uint8_t)value;
+	
+	return 0;
+}
+
+static ssize_t avr_keypad_threshold_set(struct device *device,
+					struct device_attribute *attr,
+					const char *buf, size_t count)
+{
+	int res;
+	long value;
+	struct avr_keypad *keypad = dev_get_drvdata(device);
+
+	res = strict_strtol(buf, 10, &value);
+	if (res) {
+	    dev_err(keypad->dev, "%s: invalid value %s\n", __func__, buf);
+	    value = AVR_KEYPAD_THRESHOLD_DEFAULT; 
+	}
+
+	if (avr_keypad_threshold_update(keypad, value)) {
+		dev_err(keypad->dev, "%s: could not update AVR keypad threshold\n",
+			__func__);
+		return -1;
+	}
 
 	return count;
 }
 
-static ssize_t avr_keypad_get_sensitivity(struct device *dev,
+static ssize_t avr_keypad_threshold_get(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
 	struct avr_keypad *keypad = dev_get_drvdata(dev);
-	return sprintf(buf, "%d\n", keypad->sensitivity);
+	return sprintf(buf, "%d\n", keypad->threshold);
 }
 
 static struct device_attribute avr_keypad_attrs = __ATTR(threshold, S_IRWXUGO,
-		avr_keypad_get_sensitivity,
-		avr_keypad_set_sensitivity);
+		avr_keypad_threshold_get,
+		avr_keypad_threshold_set);
 
 static void avr_keypad_key_clear(struct avr_keypad *keypad)
 {
@@ -109,7 +144,7 @@ static int avr_keypad_notifier_func(struct notifier_block *nb, unsigned long eve
 	if (event != AVR_EVENT_IRQ)
 		return NOTIFY_OK;
 
-	mutex_lock(&avr_keypad_mutex);
+	mutex_lock(&avr_keypad_lock);
 
 	/* Step 1. Scan Key */
 	while (count < 5) {
@@ -173,7 +208,7 @@ static int avr_keypad_notifier_func(struct notifier_block *nb, unsigned long eve
 	keypad->last_key = key_code;
 
 out:
-	mutex_unlock(&avr_keypad_mutex);
+	mutex_unlock(&avr_keypad_lock);
 
 	return NOTIFY_OK;
 }
@@ -225,7 +260,7 @@ static int __devinit avr_keypad_probe(struct platform_device *pdev)
 		goto err_alloc_device;
 	}
 
-	mutex_init(&avr_keypad_mutex);
+	mutex_init(&avr_keypad_lock);
 
 	/*
 	 * We don't need setting up an irq handler directly because avr core
@@ -248,6 +283,8 @@ static int __devinit avr_keypad_probe(struct platform_device *pdev)
 	rc = input_register_device(keypad->input);
 	if (rc)
 	    goto err_register_device;
+
+	avr_keypad_threshold_update(keypad, AVR_KEYPAD_THRESHOLD_DEFAULT);
 
 	return 0;
 
