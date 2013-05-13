@@ -330,6 +330,7 @@ void auo_gpio_init(void)
 
 	//HWIO_OUTM(GPIO1SH1_OE_5, 0x4000, 0x4000);
 	gpio_output_enable(GPIO_LCD_RST, 1);
+	gpio_set_value(GPIO_LCD_RST, 1);
 	//HWIO_OUTM(GPIO1SH1_OE_6,0x8001c00,0x8001c00);
 	gpio_output_enable(GPIO_SPI_CLK,1);   //0x400
 	gpio_output_enable(GPIO_SPI_DI, 1);   //0x800
