@@ -41,12 +41,12 @@
 #define RESET_REG                0x2e
 #define USE_FS                   1
 
-#define gpio_output_enable(gpio,en) do { \
+#define gpio_output_enable(gpio, en) do { \
     if (en == 0) { \
 	gpio_direction_input(gpio); \
     } \
     else { \
-	gpio_direction_output(gpio, 1); \
+	gpio_direction_output(gpio, 0); \
     } } while (0)
 
 enum {

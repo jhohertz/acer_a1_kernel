@@ -57,7 +57,7 @@
 	gpio_direction_input(gpio); \
     } \
     else { \
-	gpio_direction_output(gpio, 1); \
+	gpio_direction_output(gpio, 0); \
     } } while (0)
 
 /* Code from fastboot */
