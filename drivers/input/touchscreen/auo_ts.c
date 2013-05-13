@@ -41,7 +41,13 @@
 #define RESET_REG                0x2e
 #define USE_FS                   1
 
-#define gpio_output_enable(gpio,en) gpio_configure(gpio, en==0?GPIOF_INPUT:GPIOF_DRIVE_OUTPUT)
+#define gpio_output_enable(gpio,en) do { \
+    if (en == 0) { \
+	gpio_direction_input(gpio); \
+    } \
+    else { \
+	gpio_direction_output(gpio, 1); \
+    } } while (0)
 
 enum {
 	VERSION_4_3 = 1027,
