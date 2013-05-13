@@ -516,8 +516,6 @@ static int __init lcdc_auo_init(void)
 	pinfo->bpp = 16;
 	pinfo->fb_num = 2;
 	pinfo->clk_rate = 24576000; /* 24.576MHz to match the SPEC. from AMSS */
-	pinfo->width = 46; /* physical width in mm */
-	pinfo->height = 77; /* physical height in mm */
 
 	pinfo->lcdc.h_back_porch = 12;
 	pinfo->lcdc.h_front_porch = 16;
