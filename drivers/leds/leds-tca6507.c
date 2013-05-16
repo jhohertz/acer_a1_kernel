@@ -704,7 +704,6 @@ static int __devinit tca6507_probe(struct i2c_client *client,
 		l->num = i;
 		if (pdata->leds.leds[i].name && !pdata->leds.leds[i].flags) {
 			l->led_cdev.name = pdata->leds.leds[i].name;
-			l->led_cdev.flags = 0;
 			l->led_cdev.default_trigger
 				= pdata->leds.leds[i].default_trigger;
 			l->led_cdev.brightness_set = tca6507_brightness_set;
