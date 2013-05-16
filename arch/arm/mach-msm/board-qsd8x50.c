@@ -2139,13 +2139,16 @@ static struct msm_i2ckbd_platform_data msm_kybd_data = {
 #define TCA6507_GPIO 33
 static struct led_info tca6507_leds[] = {
 	[0] = {
-		.name = "notifications",
+		.name = "notification",
+		.default_trigger = "timer",
 	},
 	[1] = {
-		.name = "missed_call",
+		.name = "call",
+		.default_trigger = "timer",
 	},
 	[2] = {
 		.name = "battery",
+		.default_trigger = "timer",
 	},
 };
 
